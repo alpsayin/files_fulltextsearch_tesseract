@@ -22,6 +22,7 @@ use OCP\FullTextSearch\Model\ISearchRequest;
 use Psr\Log\LoggerInterface;
 use Spatie\PdfToImage\Exceptions\PageDoesNotExist;
 use Spatie\PdfToImage\Pdf;
+use thiagoalessio\TesseractOCR\FriendlyErrors;
 use thiagoalessio\TesseractOCR\TesseractOCR;
 use Throwable;
 
@@ -32,6 +33,13 @@ use Throwable;
  * @package OCA\Files_FullTextSearch_Tesseract\Service
  */
 class TesseractService {
+
+	/** Imagick decoders for the image types that can be rotated before OCR */
+	private const IMAGICK_FORMATS = [
+		'image/png' => 'png',
+		'image/jpeg' => 'jpeg',
+		'image/tiff' => 'tiff',
+	];
 
 	public function __construct(
 		private ConfigService $configService,
@@ -162,7 +170,7 @@ class TesseractService {
 			return $this->ocrHeic($path);
 		}
 
-		return $this->ocrFileFromPath($path);
+		return $this->ocrImage($path, self::IMAGICK_FORMATS[$file->getMimetype()] ?? null);
 	}
 
 
@@ -202,10 +210,87 @@ class TesseractService {
 			return '';
 		}
 
-		$content = $this->ocrFileFromPath($tmpPath);
+		$content = $this->ocrImage($tmpPath, 'pnm');
 		fclose($tmpFile);
 
 		return $content;
+	}
+
+
+	/**
+	 * If enabled and OSD reports a confident rotation, also OCR a rotated
+	 * temp copy of the first page, and return both texts.
+	 *
+	 * @param string $path
+	 * @param string|null $format Imagick decoder for the image, null if it cannot be rotated
+	 *
+	 * @return string
+	 */
+	private function ocrImage(string $path, ?string $format): string {
+		if ($format === null
+			|| $this->configService->getAppValue(ConfigService::TESSERACT_ROTATE) !== '1') {
+			return $this->ocrFileFromPath($path);
+		}
+
+		$rotate = $this->detectRotation($path);
+		if ($rotate === 0) {
+			return $this->ocrFileFromPath($path);
+		}
+
+		$this->logger->debug('rotating image for OCR', ['path' => $path, 'rotate' => $rotate]);
+
+		$tmpFile = tmpfile();
+		$tmpPath = stream_get_meta_data($tmpFile)['uri'];
+
+		try {
+			$image = new Imagick();
+			// force the decoder from the mimetype, never from the file content
+			$image->readImage($format . ':' . $path . '[0]');
+			$image->rotateImage('white', $rotate);
+			$image->setImageFormat('pnm');
+			$image->writeImage('pnm:' . $tmpPath);
+			$image->clear();
+		} catch (Throwable $e) {
+			$this->logger->notice('failed to rotate image', ['exception' => $e, 'path' => $path]);
+			fclose($tmpFile);
+
+			return $this->ocrFileFromPath($path);
+		}
+
+		$content = implode("\n", $this->ocrFilesFromPaths([$tmpPath, $path]));
+		fclose($tmpFile);
+
+		return $content;
+	}
+
+
+	/**
+	 * @param string $path
+	 *
+	 * @return int degrees to rotate clockwise, 0 if upright, unknown or below the configured confidence
+	 */
+	private function detectRotation(string $path): int {
+		try {
+			$osd = (new TesseractOCR($path))->psm(0)->withoutTempFiles()->run();
+		} catch (Exception $e) {
+			$this->logger->debug('could not detect orientation', ['path' => $path, 'error' => $e->getMessage()]);
+
+			return 0;
+		}
+
+		if (!preg_match('/Rotate: (\d+)/', $osd, $rotate)
+			|| !preg_match('/Orientation confidence: ([\d.]+)/', $osd, $confidence)) {
+			return 0;
+		}
+
+		$minConfidence = (float)$this->configService->getAppValue(ConfigService::TESSERACT_ROTATE_CONFIDENCE);
+		if ((float)$confidence[1] < $minConfidence) {
+			$this->logger->debug('ignoring unsure orientation', ['path' => $path, 'rotate' => (int)$rotate[1], 'confidence' => (float)$confidence[1]]);
+
+			return 0;
+		}
+
+		return (int)$rotate[1];
 	}
 
 
@@ -217,10 +302,8 @@ class TesseractService {
 	private function ocrFileFromPath(string $path): string {
 		$this->logger->debug('generating the TesseractOCR wrapper', ['path' => $path]);
 
-		$ocr = new TesseractOCR($path);
-		$ocr->psm($this->configService->getAppValue(ConfigService::TESSERACT_PSM));
+		$ocr = $this->newOcr($path);
 		$lang = explode(',', $this->configService->getAppValue(ConfigService::TESSERACT_LANG));
-		call_user_func_array([$ocr, 'lang'], array_map('trim', $lang));
 		$this->logger->debug('running the OCR command', ['command' => $ocr->command]);
 
 //		if ($this->configService->getLogLevel() > 0) {
@@ -241,6 +324,76 @@ class TesseractService {
 		}
 
 		return $result;
+	}
+
+
+	/**
+	 * Run the OCR of several images as parallel tesseract processes, each
+	 * writing to its own temp files.
+	 *
+	 * @param string[] $paths
+	 *
+	 * @return string[] the text of each image, '' if its OCR failed
+	 */
+	private function ocrFilesFromPaths(array $paths): array {
+		// build every command first: nothing may throw once a process is started
+		$jobs = [];
+		foreach ($paths as $path) {
+			$jobs[] = [
+				'path' => $path,
+				'ocr' => $this->newOcr($path)->withoutTempFiles(),
+				'out' => tmpfile(),
+				'err' => tmpfile()
+			];
+		}
+
+		foreach ($jobs as $i => $job) {
+			$jobs[$i]['process'] = proc_open(
+				(string)$job['ocr']->command,
+				[['file', '/dev/null', 'r'], $job['out'], $job['err']],
+				$pipes
+			);
+		}
+
+		$results = [];
+		foreach ($jobs as $job) {
+			$result = '';
+			if ($job['process'] === false) {
+				$this->logger->notice('failed to start OCR', ['path' => $job['path'], 'cmd' => $job['ocr']->command]);
+			} else {
+				proc_close($job['process']);
+				rewind($job['out']);
+				rewind($job['err']);
+				$out = stream_get_contents($job['out']);
+				try {
+					FriendlyErrors::checkCommandExecution($job['ocr']->command, $out, stream_get_contents($job['err']));
+					// same trimming as TesseractOCR::run()
+					$result = trim($out, " \t\n\r\0\x0A\x0B\x0C");
+				} catch (Exception $e) {
+					$this->logger->notice('failed to OCR', ['exception' => $e, 'path' => $job['path'], 'cmd' => $job['ocr']->command]);
+				}
+			}
+			fclose($job['out']);
+			fclose($job['err']);
+			$results[] = $result;
+		}
+
+		return $results;
+	}
+
+
+	/**
+	 * @param string $path
+	 *
+	 * @return TesseractOCR
+	 */
+	private function newOcr(string $path): TesseractOCR {
+		$ocr = new TesseractOCR($path);
+		$ocr->psm($this->configService->getAppValue(ConfigService::TESSERACT_PSM));
+		$lang = explode(',', $this->configService->getAppValue(ConfigService::TESSERACT_LANG));
+		call_user_func_array([$ocr, 'lang'], array_map('trim', $lang));
+
+		return $ocr;
 	}
 
 

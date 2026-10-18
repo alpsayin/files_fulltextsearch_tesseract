@@ -27,13 +27,17 @@ class ConfigService {
 	const TESSERACT_LANG = 'tesseract_lang';
 	const TESSERACT_PDF = 'tesseract_pdf';
 	const TESSERACT_PDF_LIMIT = 'tesseract_pdf_limit';
+	const TESSERACT_ROTATE = 'tesseract_rotate';
+	const TESSERACT_ROTATE_CONFIDENCE = 'tesseract_rotate_confidence';
 
 	public $defaults = [
-		self::TESSERACT_ENABLED   => '0',
-		self::TESSERACT_PSM       => '4',
-		self::TESSERACT_LANG      => 'eng',
-		self::TESSERACT_PDF       => '0',
-		self::TESSERACT_PDF_LIMIT => '0'
+		self::TESSERACT_ENABLED           => '0',
+		self::TESSERACT_PSM               => '4',
+		self::TESSERACT_LANG              => 'eng',
+		self::TESSERACT_PDF               => '0',
+		self::TESSERACT_PDF_LIMIT         => '0',
+		self::TESSERACT_ROTATE            => '0',
+		self::TESSERACT_ROTATE_CONFIDENCE => '2'
 	];
 
 
@@ -56,12 +60,14 @@ class ConfigService {
 		$config = $e->getArgument('config');
 		$config['files_fulltextsearch_tesseract'] =
 			[
-				'version'   => $this->getAppValue('installed_version'),
-				'enabled'   => $this->getAppValue(self::TESSERACT_ENABLED),
-				'psm'       => $this->getAppValue(self::TESSERACT_PSM),
-				'lang'      => $this->getAppValue(self::TESSERACT_LANG),
-				'pdf'       => $this->getAppValue(self::TESSERACT_PDF),
-				'pdf_limit' => $this->getAppValue(self::TESSERACT_PDF_LIMIT),
+				'version'           => $this->getAppValue('installed_version'),
+				'enabled'           => $this->getAppValue(self::TESSERACT_ENABLED),
+				'psm'               => $this->getAppValue(self::TESSERACT_PSM),
+				'lang'              => $this->getAppValue(self::TESSERACT_LANG),
+				'pdf'               => $this->getAppValue(self::TESSERACT_PDF),
+				'pdf_limit'         => $this->getAppValue(self::TESSERACT_PDF_LIMIT),
+				'rotate'            => $this->getAppValue(self::TESSERACT_ROTATE),
+				'rotate_confidence' => $this->getAppValue(self::TESSERACT_ROTATE_CONFIDENCE),
 			];
 		$e->setArgument('config', $config);
 	}

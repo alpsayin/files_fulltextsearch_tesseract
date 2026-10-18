@@ -16,6 +16,8 @@ var fts_tesseract_elements = {
 	tesseract_lang: null,
 	tesseract_pdf: null,
 	tesseract_pdf_limit: null,
+	tesseract_rotate: null,
+	tesseract_rotate_confidence: null,
 
 	init: function () {
 		fts_tesseract_elements.tesseract_div = $('#files_ocr-tesseract');
@@ -24,12 +26,16 @@ var fts_tesseract_elements = {
 		fts_tesseract_elements.tesseract_ocr = $('#tesseract_ocr');
 		fts_tesseract_elements.tesseract_pdf = $('#tesseract_pdf');
 		fts_tesseract_elements.tesseract_pdf_limit = $('#tesseract_pdf_limit');
+		fts_tesseract_elements.tesseract_rotate = $('#tesseract_rotate');
+		fts_tesseract_elements.tesseract_rotate_confidence = $('#tesseract_rotate_confidence');
 
 		fts_tesseract_elements.tesseract_ocr.on('change', fts_tesseract_elements.updateSettings);
 		fts_tesseract_elements.tesseract_psm.on('change', fts_tesseract_elements.updateSettings);
 		fts_tesseract_elements.tesseract_lang.on('change', fts_tesseract_elements.updateSettings);
 		fts_tesseract_elements.tesseract_pdf.on('change', fts_tesseract_elements.updateSettings);
 		fts_tesseract_elements.tesseract_pdf_limit.on('change', fts_tesseract_elements.updateSettings);
+		fts_tesseract_elements.tesseract_rotate.on('change', fts_tesseract_elements.updateSettings);
+		fts_tesseract_elements.tesseract_rotate_confidence.on('change', fts_tesseract_elements.updateSettings);
 	},
 
 

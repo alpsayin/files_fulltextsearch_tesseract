@@ -76,6 +76,30 @@ Util::addScript(Application::APP_NAME, 'admin');
 			</div>
 		</div>
 
+		<div class="div-table-row tesseract_ocr_enabled">
+			<div class="div-table-col div-table-col-left">
+				<span class="leftcol">Rotate sideways images</span>
+				<br/>
+				<em>detect sideways images and also OCR them rotated (heavy on resource)</em>
+			</div>
+			<div class="div-table-col">
+				<input type="checkbox" id="tesseract_rotate" value="1"/>
+			</div>
+		</div>
+
+		<div class="div-table-row tesseract_ocr_enabled">
+			<div class="div-table-col div-table-col-left">
+				<span class="leftcol">Rotation confidence</span>
+				<br/>
+				<em>minimum confidence of the <a href="https://tesseract-ocr.github.io/tessdoc/ImproveQuality.html#page-segmentation-method">orientation
+						detection (OSD)</a> to rotate: 0 or more with no upper limit, not a percentage; photos
+					without text usually score below 1</em>
+			</div>
+			<div class="div-table-col">
+				<input type="number" class="small" id="tesseract_rotate_confidence" min="0" step="0.1" value=""/>
+			</div>
+		</div>
+
 	</div>
 
 
