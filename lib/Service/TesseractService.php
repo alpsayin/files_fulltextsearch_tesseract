@@ -10,6 +10,7 @@ namespace OCA\Files_FullTextSearch_Tesseract\Service;
 
 
 use Exception;
+use Imagick;
 use OC\Files\View;
 use OCP\EventDispatcher\GenericEvent;
 use OCP\Files\File;
@@ -53,6 +54,11 @@ class TesseractService {
 			'image/vnd.djvu',
 			'application/pdf'
 		];
+
+		if ($this->isHeicSupported()) {
+			$ocrMimes[] = 'image/heic';
+			$ocrMimes[] = 'image/heif';
+		}
 
 		foreach ($ocrMimes as $mime) {
 			if (strpos($mimeType, $mime) === 0) {
@@ -152,7 +158,54 @@ class TesseractService {
 			throw new NotFoundException();
 		}
 
+		if (in_array($file->getMimetype(), ['image/heic', 'image/heif'], true)) {
+			return $this->ocrHeic($path);
+		}
+
 		return $this->ocrFileFromPath($path);
+	}
+
+
+	/**
+	 * @return bool
+	 */
+	private function isHeicSupported(): bool {
+		return extension_loaded('imagick') && in_array('HEIC', Imagick::queryFormats('HEI*'), true);
+	}
+
+
+	/**
+	 * Convert HEIC/HEIF to a temp PNM for tesseract.
+	 *
+	 * @param string $path
+	 *
+	 * @return string
+	 */
+	private function ocrHeic(string $path): string {
+		$this->logger->debug('converting HEIC to a temp PNM', ['path' => $path]);
+
+		$tmpFile = tmpfile();
+		$tmpPath = stream_get_meta_data($tmpFile)['uri'];
+
+		try {
+			$image = new Imagick();
+			// force the HEIC decoder, never one picked from the file content; [0] is the primary image
+			$image->readImage('heic:' . $path . '[0]');
+			$image->autoOrient();
+			$image->setImageFormat('pnm');
+			$image->writeImage('pnm:' . $tmpPath);
+			$image->clear();
+		} catch (Throwable $e) {
+			$this->logger->notice('failed to convert HEIC', ['exception' => $e, 'path' => $path]);
+			fclose($tmpFile);
+
+			return '';
+		}
+
+		$content = $this->ocrFileFromPath($tmpPath);
+		fclose($tmpFile);
+
+		return $content;
 	}
 
 
